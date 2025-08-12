@@ -1,7 +1,9 @@
 #![allow(unused_imports)]
+
+use std::io::Write;
 use std::net::TcpListener;
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
@@ -9,14 +11,15 @@ fn main() {
     //
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     //
-    for stream in listener.incoming() {
+    for stream in &mut listener.incoming() {
         match stream {
-            Ok(_stream) => {
-                println!("accepted new connection");
+            Ok(mut stream) => {
+                stream.write_all("+PONG\r\n".as_bytes()).unwrap();
             }
             Err(e) => {
                 println!("error: {}", e);
             }
         }
     }
+    Ok(())
 }
