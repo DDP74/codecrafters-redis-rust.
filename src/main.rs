@@ -2,6 +2,8 @@
 
 use std::io::Write;
 use std::net::TcpListener;
+use std::net::TcpStream;
+use std::io::Read;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
@@ -11,10 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     //
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
     //
-    for stream in &mut listener.incoming() {
+    for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                stream.write_all("+PONG\r\n".as_bytes()).unwrap();
+                let thread_handle = std::thread::spawn(move ||handle_connection(stream));
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -23,3 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+fn handle_connection(mut stream: TcpStream) {
+    let mut buffer = [0; 1024];
+    loop {
+        stream.read(&mut buffer).unwrap();
+        stream.write_all(b"+PONG\r\n").unwrap();
+    }
+}
+
