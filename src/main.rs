@@ -6,18 +6,19 @@ use std::net::TcpStream;
 use std::io::{Read, BufReader, BufRead};
 use std::ptr::read;
 use bytes::BufMut;
+use tokio::io::ReadBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // You can use print statements as follows for debugging, they'll be visible when running tests.
     println!("Logs from your program will appear here!");
 
     // Uncomment this block to pass the first stage
-    //
+
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    //
+
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
+            Ok(stream) => {
                 std::thread::spawn(move ||handle_connection(stream));
             }
             Err(e) => {
@@ -30,28 +31,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn handle_connection(mut stream: TcpStream) ->  Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
-    let mut buffer_in = Vec::new();
+    let mut buffer_in = String::new();
     let mut buffer_out: Vec<u8> = Vec::new();
 
     loop {
+
         println!("Waiting for data...");
+        //let strsize = stream.read_to_string(&mut buffer_in).unwrap();
+        let mut reader = BufReader::new(&stream);
+        let strsize = reader.read_line(&mut buffer_in).unwrap();
 
-        let bsize = stream.read_to_end(&mut buffer_in).unwrap();
-
-        if bsize == 0 {
+        if strsize == 0 {
             println!("No data from client received");
             break;
         }
 
-        println!("Received {} bytes", bsize);
-        println!("Buffer: {:?}", &buffer_in[..bsize]);
+        println!("Received {} bytes", strsize);
+        println!("Buffer: {:?}", &buffer_in[..strsize]);
 
         // The first byte of a RESP message indicates its type.
         // For commands, it's always an array, which starts with '*'.
 
-        if char::from(buffer_in[0]) == '*' {
+        if char::from(buffer_in.as_bytes()[0]) == '*' {
 
-            let command_parts = parse_resp_array(&buffer_in).unwrap();
+            let command_parts = parse_resp_array(&mut reader).unwrap();
             println!("Command parts: {:#?}", command_parts);
 
             if command_parts.is_empty() {
@@ -73,6 +76,8 @@ fn handle_connection(mut stream: TcpStream) ->  Result<(), Box<dyn std::error::E
                     buffer_out.extend_from_slice(b"\r\n");
                     println!("Echoing: {:?}", String::from_utf8_lossy(&buffer_out));
                     stream.write_all(&buffer_out).unwrap();
+                    buffer_in.clear();
+
                     //stream.write_all(b"$3\r\n").unwrap();
                     //stream.write_all(command_parts[1].as_bytes()).unwrap();
                     //stream.write_all(b"\r\n").unwrap();
@@ -90,28 +95,28 @@ fn handle_connection(mut stream: TcpStream) ->  Result<(), Box<dyn std::error::E
 }
 
 /// Parses a RESP array from the reader into a Vec of strings.
-fn parse_resp_array(buffer: &[u8]) -> Result<Vec<String>, std::io::Error> {
-    let mut reader = BufReader::new(buffer);
-    let lines   = reader.lines();
-    //println!("Lines: {:#?}", lines);
+fn parse_resp_array(reader: &mut BufReader<&TcpStream>) -> Result<Vec<String>, std::io::Error> {
 
     let mut parts = Vec::new();
-
     let mut arrays_command_length = 0;
     let mut bulk_string_length = 0;
-    for ( index ,mut line) in lines.enumerate() {
-        println!("Index: {:#?}", index);
-        println!("Line: {:#?}", line);
+    let mut iter = reader.lines().enumerate();
 
-        let mut line = line.unwrap();
+    while let Some((index, line_wrapped)) = iter.next() {
+
+        println!("Index: {:#?}", index);
+        println!("Line: {:#?}", line_wrapped);
+
+        let line = line_wrapped.unwrap();
         let mut chars = line.chars();
         // The first byte of a RESP message indicates its type.
         // For commands, it's always an array, which starts with '*'.
         let mut char = chars.next().unwrap();
         println!("Char --->: {:#?}", char);
-        if index == 0 && char  != '*' {
-            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid data"));
-        } else if index == 0 && char == '*' {
+        //if index == 0 && char  != '*' {
+          //  return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid data"));
+          //} else
+        if index == 0 && char == '*' {
                 char = chars.next().unwrap();
                 if char.is_digit(10) {
                     arrays_command_length = char.to_digit(10).unwrap() as usize;
@@ -134,6 +139,14 @@ fn parse_resp_array(buffer: &[u8]) -> Result<Vec<String>, std::io::Error> {
                 println!("Bulk string: {:#?}", line);
             }
             parts.push(line);
+        }
+        println!("Parts length: {:#?}", parts.len());
+        if parts.len() == 2 {
+            break;
+        }
+
+        if parts[0] == "PING" {
+            break;
         }
     }
     Ok(parts)
